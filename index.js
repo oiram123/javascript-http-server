@@ -6,25 +6,32 @@ const server = net.createServer((c) => {
     const request = buffer.toString();
     const lines = request.split("\r\n");
     const [method, path, version] = lines[0].split(" ");
+    const headers = parseHeaders(lines);
+    let body = ""; //body is for post method
 
-    parseHeaders(lines);
-
-    supportRoutes(path);
     if (method === "POST") {
-      console.log("is this called");
-      splitBody(lines);
+      body = splitBody(lines);
     }
 
-    console.log("method-", method);
-    console.log("path-", path);
-    console.log("version-", version);
+    if (!method || !path) {
+      //bad request
+      send400(c);
+      return;
+    }
+
+    if (!isValidMethod(method)) {
+      send400(c);
+    }
+
+    if ((method === "POST" && !body) || body.trim() === "") {
+      send400(c, "Missing body");
+      return;
+    }
   });
 
   c.on("end", () => {
     console.log("client disconnected");
   });
-
-  c.pipe(c);
 });
 
 server.listen(3000, () => {
@@ -32,30 +39,33 @@ server.listen(3000, () => {
 });
 
 function parseHeaders(lines) {
-  console.log("headers line->", lines);
   const headers = {};
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
+    if (lines[i] === "") break;
+    const [key, value] = lines[i].split(": ");
+    headers[key] = value;
   }
-
-  //  if (line === "") return);
-
-  console.log("headers", headers);
-}
-
-function supportRoutes(path) {
-  switch (path) {
-    case "/":
-      return "home";
-    case "/users":
-      return "users";
-    default:
-      return "not found";
-  }
+  return headers;
 }
 
 function splitBody(lines) {
   const emptyIndex = lines.indexOf("");
   const body = lines.splice(emptyIndex + 1).join("\r\n");
-  console.log("body", JSON.parse(body));
+  console.log("body", body);
+  return body;
+}
+
+function send400(socket, message = "Bad Request") {
+  socket.write(
+    "HTTP/1.1 400 Bad Request\r\n" +
+      "Content-Type: text/plain\r\n" +
+      `Content-Length: ${message.length}\r\n` +
+      "\r\n" +
+      message,
+  );
+}
+
+function isMethodValid(method) {
+  const m = ["POST", "GET", "PUT", "DELETE"];
+  return m.includes(method);
 }
