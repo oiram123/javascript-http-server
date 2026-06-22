@@ -1,16 +1,58 @@
 const net = require("node:net");
+const {
+  send400,
+  send200,
+  sendGet200,
+  splitBody,
+  isMethodValid,
+  isBodyValid,
+  parseHeaders,
+} = require("./helpers.js");
+
 const server = net.createServer((c) => {
   console.log("client connected");
 
   c.on("data", (buffer) => {
-    const request = buffer.toString();
-    const lines = request.split("\r\n");
+    const doubleLineBreakIndex = buffer.indexOf("\r\n\r\n");
+    if (doubleLineBreakIndex === -1) {
+      return;
+    }
+    console.log(buffer);
+
+    const headerString = buffer.toString("ascii", 0, doubleLineBreakIndex);
+    console.log(headerString);
+    const lines = headerString.split("\r\n");
     const [method, path, version] = lines[0].split(" ");
     const headers = parseHeaders(lines);
     let body = ""; //body is for post method
+    const contentLength = headers["Content-Length"];
 
-    if (method === "POST") {
+    if (!isMethodValid(method)) {
+      send400(c);
+    }
+
+    if (["POST", "PUT", "PATCH"].includes(method)) {
       body = splitBody(lines);
+
+      if (!isBodyValid(contentLength, body)) {
+        send400(c);
+      }
+    }
+
+    if (method === "GET") {
+      const [route, queryString] = path.split("?");
+      const queryData = {};
+      if (queryString) {
+        const pairs = queryString.split("&");
+        for (let i in pairs) {
+          let pair = pairs[i].split("=");
+          const [key, value] = pair;
+          queryData[key] = value;
+          console.log("queryData", queryData);
+          sendGet200(c, JSON.stringify(queryData));
+          return;
+        }
+      }
     }
 
     if (!method || !path) {
@@ -19,14 +61,7 @@ const server = net.createServer((c) => {
       return;
     }
 
-    if (!isValidMethod(method)) {
-      send400(c);
-    }
-
-    if ((method === "POST" && !body) || body.trim() === "") {
-      send400(c, "Missing body");
-      return;
-    }
+    send200(c, body);
   });
 
   c.on("end", () => {
@@ -34,38 +69,6 @@ const server = net.createServer((c) => {
   });
 });
 
-server.listen(3000, () => {
+server.listen(3001, () => {
   console.log("server bound");
 });
-
-function parseHeaders(lines) {
-  const headers = {};
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i] === "") break;
-    const [key, value] = lines[i].split(": ");
-    headers[key] = value;
-  }
-  return headers;
-}
-
-function splitBody(lines) {
-  const emptyIndex = lines.indexOf("");
-  const body = lines.splice(emptyIndex + 1).join("\r\n");
-  console.log("body", body);
-  return body;
-}
-
-function send400(socket, message = "Bad Request") {
-  socket.write(
-    "HTTP/1.1 400 Bad Request\r\n" +
-      "Content-Type: text/plain\r\n" +
-      `Content-Length: ${message.length}\r\n` +
-      "\r\n" +
-      message,
-  );
-}
-
-function isMethodValid(method) {
-  const m = ["POST", "GET", "PUT", "DELETE"];
-  return m.includes(method);
-}
